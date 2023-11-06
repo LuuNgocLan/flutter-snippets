@@ -2,9 +2,11 @@
 
 A new Flutter project.
 
-## Getting Started
+<img width="1217" alt="Group 1339" src="https://github.com/LuuNgocLan/flutter-snippets/assets/29207172/d4c3052f-1dec-4de6-9359-8205bada1ade">
 
-This project is a starting point for a Flutter application.
+## Medium post 
+
+https://medium.com/@lanltn/flutter-stripe-pattern-canvas-d5f221869695
 
 A few resources to get you started if this is your first Flutter project:
 
