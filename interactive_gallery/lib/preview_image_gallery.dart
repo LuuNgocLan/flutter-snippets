@@ -18,8 +18,7 @@ class PreviewImageGallery extends StatefulWidget {
   State<PreviewImageGallery> createState() => _PreviewImageGalleryState();
 }
 
-class _PreviewImageGalleryState extends State<PreviewImageGallery>
-    with SingleTickerProviderStateMixin {
+class _PreviewImageGalleryState extends State<PreviewImageGallery> with TickerProviderStateMixin {
   final TransformationController _transformationController = TransformationController();
 
   /// The current scale of the [InteractiveViewer].
@@ -34,6 +33,17 @@ class _PreviewImageGalleryState extends State<PreviewImageGallery>
   late AnimationController _animationController;
   Animation<Matrix4>? _animation;
 
+  /// For handle drag to pop action
+  late final AnimationController _dragAnimationController;
+
+  /// Drag offset animation controller.
+  late Animation<Offset> _dragAnimation;
+  Offset? _dragOffset;
+  Offset? _previousPosition;
+
+  /// Flag to enabled/disabled drag to pop action
+  bool _enableDrag = true;
+
   @override
   void initState() {
     super.initState();
@@ -44,10 +54,34 @@ class _PreviewImageGalleryState extends State<PreviewImageGallery>
     )..addListener(() {
         _transformationController.value = _animation?.value ?? Matrix4.identity();
       });
+
+    /// initial drag animation controller
+    _dragAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 200),
+    )..addStatusListener((status) {
+        _onAnimationEnd(status);
+      });
+    _dragAnimation = Tween<Offset>(
+      begin: Offset.zero,
+      end: Offset.zero,
+    ).animate(_dragAnimationController);
+  }
+
+  void _onAnimationEnd(AnimationStatus status) {
+    if (status == AnimationStatus.completed) {
+      _dragAnimationController.reset();
+      setState(() {
+        _dragOffset = null;
+        _previousPosition = null;
+      });
+    }
   }
 
   @override
   void dispose() {
+    _dragAnimationController.removeStatusListener(_onAnimationEnd);
+    _dragAnimationController.dispose();
     _animationController.dispose();
     _transformationController.dispose();
     super.dispose();
@@ -72,53 +106,136 @@ class _PreviewImageGalleryState extends State<PreviewImageGallery>
               ),
               onPressed: () => Navigator.of(context).pop(),
             )),
-        body: CarouselSlider(
-          disableGesture: true,
-          items: widget.imageUrls
-              .map(
-                (e) => InteractiveViewer(
-                  transformationController: _transformationController,
-                  onInteractionStart: (details) {
-                    if (_scale == 1.0) {
-                      _enablePageView = true;
-                    } else {
-                      _enablePageView = false;
-                    }
-                    setState(() {});
-                  },
-                  child: Hero(
-                    tag: 'img_${widget.imageUrls.indexOf(e)}',
-                    child: GestureDetector(
-                      onDoubleTapDown: (TapDownDetails details) {
-                        _doubleTapLocalPosition = details.localPosition;
-                      },
-                      onDoubleTap: _onDoubleTap,
-                      child: Image.network(
-                        e,
-                        width: double.infinity,
-                        fit: BoxFit.cover,
+        body: AnimatedBuilder(
+          builder: (context, Widget? child) {
+            Offset finalOffset = _dragOffset ?? const Offset(0.0, 0.0);
+            if (_dragAnimation.status == AnimationStatus.forward)
+              finalOffset = _dragAnimation.value;
+            return Transform.translate(
+              offset: finalOffset,
+              child: child,
+            );
+          },
+          animation: _dragAnimation,
+          child: CarouselSlider(
+            disableGesture: true,
+            items: widget.imageUrls
+                .map(
+                  (e) => InteractiveViewer(
+                    minScale: widget.minScale,
+                    maxScale: widget.maxScale,
+                    transformationController: _transformationController,
+                    onInteractionUpdate: (details) {
+                      _onDragUpdate(details);
+                      if (_scale == 1.0) {
+                        _enablePageView = true;
+                      } else {
+                        _enablePageView = false;
+                      }
+                      setState(() {});
+                    },
+                    onInteractionEnd: (details) {
+                      if (_enableDrag) {
+                        _onOverScrollDragEnd(details);
+                      }
+                    },
+                    onInteractionStart: (details) {
+                      if (_enableDrag) {
+                        _onDragStart(details);
+                      }
+                    },
+                    child: Hero(
+                      tag: 'img_${widget.imageUrls.indexOf(e)}',
+                      child: GestureDetector(
+                        onDoubleTapDown: (TapDownDetails details) {
+                          _doubleTapLocalPosition = details.localPosition;
+                        },
+                        onDoubleTap: _onDoubleTap,
+                        child: Image.network(
+                          e,
+                          width: double.infinity,
+                          fit: BoxFit.cover,
+                        ),
                       ),
                     ),
                   ),
-                ),
-              )
-              .toList(),
-          options: CarouselOptions(
-            initialPage: _currentIndex,
-            aspectRatio: 1.0,
-            viewportFraction: 1.0,
-            height: MediaQuery.of(context).size.height,
-            scrollPhysics: _enablePageView ? null : const NeverScrollableScrollPhysics(),
-            enlargeCenterPage: false,
-            onPageChanged: (index, reason) {
-              setState(() {
-                _currentIndex = index;
-              });
-            },
+                )
+                .toList(),
+            options: CarouselOptions(
+              initialPage: _currentIndex,
+              aspectRatio: 1.0,
+              viewportFraction: 1.0,
+              height: MediaQuery.of(context).size.height,
+              scrollPhysics: _enablePageView ? null : const NeverScrollableScrollPhysics(),
+              enlargeCenterPage: false,
+              onPageChanged: (index, reason) {
+                setState(() {
+                  _currentIndex = index;
+                });
+              },
+            ),
           ),
         ),
       ),
     );
+  }
+
+  void _onDragStart(ScaleStartDetails scaleDetails) {
+    _previousPosition = scaleDetails.focalPoint;
+  }
+
+  void _onDragUpdate(ScaleUpdateDetails scaleUpdateDetails) {
+    final currentPosition = scaleUpdateDetails.focalPoint;
+    final previousPosition = _previousPosition ?? currentPosition;
+
+    final newY = (_dragOffset?.dy ?? 0.0) + (currentPosition.dy - previousPosition.dy);
+    _previousPosition = currentPosition;
+    if (_enableDrag) {
+      setState(() {
+        _dragOffset = Offset(0, newY);
+      });
+    }
+  }
+
+  /// Handles the end of an over-scroll drag event.
+  ///
+  /// If [scaleEndDetails] is not null, it checks if the drag offset exceeds a certain threshold
+  /// and if the velocity is fast enough to trigger a pop action. If so, it pops the current route.
+  void _onOverScrollDragEnd(ScaleEndDetails? scaleEndDetails) {
+    if (_dragOffset == null) return;
+    final dragOffset = _dragOffset!;
+
+    final screenSize = MediaQuery.of(context).size;
+
+    if (scaleEndDetails != null) {
+      if (dragOffset.dy.abs() >= screenSize.height / 3) {
+        Navigator.of(context, rootNavigator: true).pop();
+        return;
+      }
+      final velocity = scaleEndDetails.velocity.pixelsPerSecond;
+      final velocityY = velocity.dy;
+
+      /// Make sure the velocity is fast enough to trigger the pop action
+      /// Prevent mistake zoom in fast and drag => check dragOffset.dy.abs() > thresholdOffsetYToEnablePop
+      const thresholdOffsetYToEnablePop = 75.0;
+      const thresholdVelocityYToEnablePop = 200.0;
+      if (velocityY.abs() > thresholdOffsetYToEnablePop &&
+          dragOffset.dy.abs() > thresholdVelocityYToEnablePop &&
+          _enableDrag) {
+        Navigator.of(context, rootNavigator: true).pop();
+        return;
+      }
+    }
+
+    /// Reset position to center of the screen when the drag is canceled.
+    setState(() {
+      _dragAnimation = Tween<Offset>(
+        begin: Offset(0.0, dragOffset.dy),
+        end: const Offset(0.0, 0.0),
+      ).animate(_dragAnimationController);
+      _dragOffset = const Offset(0.0, 0.0);
+      _dragAnimationController.forward();
+    });
   }
 
   _onDoubleTap() {
