@@ -44,6 +44,15 @@ class _PreviewImageGalleryState extends State<PreviewImageGallery> with TickerPr
   /// Flag to enabled/disabled drag to pop action
   bool _enableDrag = true;
 
+  /// Animate hide bar
+  late final AnimationController _hidePercentController = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 100),
+  );
+  late final Animation<double> _aniHidePercent =
+      Tween<double>(begin: 1.0, end: 0.0).animate(_hidePercentController);
+  bool _isTapScreen = false;
+
   @override
   void initState() {
     super.initState();
@@ -66,6 +75,26 @@ class _PreviewImageGalleryState extends State<PreviewImageGallery> with TickerPr
       begin: Offset.zero,
       end: Offset.zero,
     ).animate(_dragAnimationController);
+
+    /// initial hide bar animation
+    _hidePercentController.addListener(() {
+      if (_hidePercentController.status == AnimationStatus.dismissed) {
+        _delayHideMenu();
+      }
+    });
+  }
+
+  _checkShowBar() {
+    if (_aniHidePercent.value <= 0) {
+      _hidePercentController.reverse();
+    } else {
+      _hidePercentController.forward();
+    }
+  }
+
+  Future _delayHideMenu() async {
+    if (_isTapScreen) return;
+    await _hidePercentController.forward();
   }
 
   void _onAnimationEnd(AnimationStatus status) {
@@ -80,6 +109,7 @@ class _PreviewImageGalleryState extends State<PreviewImageGallery> with TickerPr
 
   @override
   void dispose() {
+    _hidePercentController.dispose();
     _dragAnimationController.removeStatusListener(_onAnimationEnd);
     _dragAnimationController.dispose();
     _animationController.dispose();
@@ -90,9 +120,36 @@ class _PreviewImageGalleryState extends State<PreviewImageGallery> with TickerPr
   @override
   Widget build(BuildContext context) {
     return SafeArea(
+      top: false,
       child: Scaffold(
-        appBar: AppBar(
-            backgroundColor: Colors.black,
+        backgroundColor: Colors.transparent,
+        body: Stack(
+          fit: StackFit.loose,
+          children: [
+            _buildImageSliders(context),
+            _buildToolbar(context),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildToolbar(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _aniHidePercent,
+      builder: (context, child) {
+        return Opacity(
+          opacity: _aniHidePercent.value,
+          child: child,
+        );
+      },
+      child: SafeArea(
+        maintainBottomViewPadding: true,
+        child: SizedBox(
+          height: kToolbarHeight,
+          child: AppBar(
+            toolbarHeight: kToolbarHeight,
+            backgroundColor: Colors.transparent,
             title: Text(
               '${_currentIndex + 1}/${widget.imageUrls.length}',
               style:
@@ -105,76 +162,82 @@ class _PreviewImageGalleryState extends State<PreviewImageGallery> with TickerPr
                 color: Colors.white,
               ),
               onPressed: () => Navigator.of(context).pop(),
-            )),
-        body: AnimatedBuilder(
-          builder: (context, Widget? child) {
-            Offset finalOffset = _dragOffset ?? const Offset(0.0, 0.0);
-            if (_dragAnimation.status == AnimationStatus.forward)
-              finalOffset = _dragAnimation.value;
-            return Transform.translate(
-              offset: finalOffset,
-              child: child,
-            );
-          },
-          animation: _dragAnimation,
-          child: CarouselSlider(
-            disableGesture: true,
-            items: widget.imageUrls
-                .map(
-                  (e) => InteractiveViewer(
-                    minScale: widget.minScale,
-                    maxScale: widget.maxScale,
-                    transformationController: _transformationController,
-                    onInteractionUpdate: (details) {
-                      _onDragUpdate(details);
-                      if (_scale == 1.0) {
-                        _enablePageView = true;
-                      } else {
-                        _enablePageView = false;
-                      }
-                      setState(() {});
-                    },
-                    onInteractionEnd: (details) {
-                      if (_enableDrag) {
-                        _onOverScrollDragEnd(details);
-                      }
-                    },
-                    onInteractionStart: (details) {
-                      if (_enableDrag) {
-                        _onDragStart(details);
-                      }
-                    },
-                    child: Hero(
-                      tag: 'img_${widget.imageUrls.indexOf(e)}',
-                      child: GestureDetector(
-                        onDoubleTapDown: (TapDownDetails details) {
-                          _doubleTapLocalPosition = details.localPosition;
-                        },
-                        onDoubleTap: _onDoubleTap,
-                        child: Image.network(
-                          e,
-                          width: double.infinity,
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                    ),
-                  ),
-                )
-                .toList(),
-            options: CarouselOptions(
-              initialPage: _currentIndex,
-              aspectRatio: 1.0,
-              viewportFraction: 1.0,
-              height: MediaQuery.of(context).size.height,
-              scrollPhysics: _enablePageView ? null : const NeverScrollableScrollPhysics(),
-              enlargeCenterPage: false,
-              onPageChanged: (index, reason) {
-                setState(() {
-                  _currentIndex = index;
-                });
-              },
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildImageSliders(BuildContext context) {
+    return AnimatedBuilder(
+      builder: (context, Widget? child) {
+        Offset finalOffset = _dragOffset ?? const Offset(0.0, 0.0);
+        if (_dragAnimation.status == AnimationStatus.forward) finalOffset = _dragAnimation.value;
+        return Transform.translate(
+          offset: finalOffset,
+          child: child,
+        );
+      },
+      animation: _dragAnimation,
+      child: CarouselSlider(
+        disableGesture: true,
+        items: widget.imageUrls
+            .map(
+              (e) => InteractiveViewer(
+                minScale: widget.minScale,
+                maxScale: widget.maxScale,
+                transformationController: _transformationController,
+                onInteractionUpdate: (details) {
+                  _onDragUpdate(details);
+                  if (_scale == 1.0) {
+                    _enablePageView = true;
+                    _enableDrag = true;
+                  } else {
+                    _enablePageView = false;
+                    _enableDrag = false;
+                  }
+                  setState(() {});
+                },
+                onInteractionEnd: (details) {
+                  if (_enableDrag) {
+                    _onOverScrollDragEnd(details);
+                  }
+                },
+                onInteractionStart: (details) {
+                  if (_enableDrag) {
+                    _onDragStart(details);
+                  }
+                },
+                child: Hero(
+                  tag: 'img_${widget.imageUrls.indexOf(e)}',
+                  child: GestureDetector(
+                    onDoubleTapDown: (TapDownDetails details) {
+                      _doubleTapLocalPosition = details.localPosition;
+                    },
+                    onDoubleTap: _onDoubleTap,
+                    child: Image.network(
+                      e,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                ),
+              ),
+            )
+            .toList(),
+        options: CarouselOptions(
+          initialPage: _currentIndex,
+          aspectRatio: 1.0,
+          viewportFraction: 1.0,
+          height: MediaQuery.of(context).size.height,
+          scrollPhysics: _enablePageView ? null : const NeverScrollableScrollPhysics(),
+          enlargeCenterPage: false,
+          onPageChanged: (index, reason) {
+            setState(() {
+              _currentIndex = index;
+            });
+          },
         ),
       ),
     );

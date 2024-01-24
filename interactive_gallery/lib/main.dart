@@ -65,8 +65,9 @@ class _MyHomePageState extends State<MyHomePage> {
                   (e) => GestureDetector(
                     onTap: () {
                       Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (context) => PreviewImageGallery(
+                        PageRouteBuilder(
+                          opaque: false, // set to false to make the background page transparent
+                          pageBuilder: (context, animation, _) => PreviewImageGallery(
                             imageUrls: imageUrls,
                             initialIndex: imageUrls.indexOf(e),
                           ),
@@ -74,7 +75,7 @@ class _MyHomePageState extends State<MyHomePage> {
                       );
                     },
                     child: Hero(
-                      tag: "img_${imageUrls.indexOf(e)}",
+                      tag: "img1_${imageUrls.indexOf(e)}",
                       child: Image.network(
                         e,
                         width: double.infinity,
